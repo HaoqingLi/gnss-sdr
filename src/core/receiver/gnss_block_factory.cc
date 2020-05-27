@@ -65,6 +65,7 @@
 #include "gps_l1_ca_dll_pll_tracking.h"
 #include "gps_l1_ca_kf_tracking.h"
 #include "gps_l1_ca_pcps_acquisition.h"
+#include "gps_l1_ca_pcps_acquisition_robust.h"
 #include "gps_l1_ca_pcps_acquisition_fine_doppler.h"
 #include "gps_l1_ca_pcps_assisted_acquisition.h"
 #include "gps_l1_ca_pcps_quicksync_acquisition.h"
@@ -1542,6 +1543,12 @@ std::unique_ptr<GNSSBlockInterface> GNSSBlockFactory::GetBlock(
                 out_streams));
             block = std::move(block_);
         }
+    else if (implementation == "GPS_L1_CA_PCPS_Acquisition_robust")
+        {
+            std::unique_ptr<GNSSBlockInterface> block_(new GpsL1CaPcpsAcquisitionrobust(configuration.get(), role, in_streams,
+                out_streams));
+            block = std::move(block_);
+        }
 
 #if ENABLE_FPGA
     else if (implementation == "GPS_L1_CA_PCPS_Acquisition_Fpga")
@@ -1947,6 +1954,12 @@ std::unique_ptr<AcquisitionInterface> GNSSBlockFactory::GetAcqBlock(
     if (implementation == "GPS_L1_CA_PCPS_Acquisition")
         {
             std::unique_ptr<AcquisitionInterface> block_(new GpsL1CaPcpsAcquisition(configuration.get(), role, in_streams,
+                out_streams));
+            block = std::move(block_);
+        }
+    else if (implementation == "GPS_L1_CA_PCPS_Acquisition_robust")
+        {
+            std::unique_ptr<AcquisitionInterface> block_(new GpsL1CaPcpsAcquisitionrobust(configuration.get(), role, in_streams,
                 out_streams));
             block = std::move(block_);
         }
