@@ -25,7 +25,7 @@
 #ifndef GNSS_SDR_GPS_L1_CA_PCPS_ACQUISITION_ROBUST_H
 #define GNSS_SDR_GPS_L1_CA_PCPS_ACQUISITION_ROBUST_H
 
-#include "acq_conf.h"
+#include "acq_robust_conf.h"
 #include "channel_fsm.h"
 #include "complex_byte_to_float_x2.h"
 #include "gnss_synchro.h"
@@ -158,7 +158,7 @@ public:
 private:
     ConfigurationInterface* configuration_;
     pcps_acquisition_robust_sptr acquisition_;
-    Acq_Conf acq_parameters_;
+    Acq_robust_Conf acq_parameters_;
     gr::blocks::float_to_complex::sptr float_to_complex_;
     complex_byte_to_float_x2_sptr cbyte_to_float_x2_;
     size_t item_size_;

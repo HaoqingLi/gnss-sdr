@@ -45,7 +45,7 @@
 #define ARMA_NO_DEBUG 1
 #endif
 
-#include "acq_conf.h"
+#include "acq_robust_conf.h"
 #include "channel_fsm.h"
 #include <armadillo>
 #include <glog/logging.h>
@@ -84,7 +84,7 @@ using pcps_acquisition_robust_sptr = std::shared_ptr<pcps_acquisition_robust>;
 using pcps_acquisition_robust_sptr = boost::shared_ptr<pcps_acquisition_robust>;
 #endif
 
-pcps_acquisition_robust_sptr pcps_make_acquisition_robust(const Acq_Conf& conf_);
+pcps_acquisition_robust_sptr pcps_make_acquisition_robust(const Acq_robust_Conf& conf_);
 
 /*!
  * \brief This class implements a Parallel Code Phase Search Acquisition.
@@ -218,14 +218,20 @@ public:
         gr_vector_void_star& output_items);
 
 private:
-    friend pcps_acquisition_robust_sptr pcps_make_acquisition_robust(const Acq_Conf& conf_);
-    explicit pcps_acquisition_robust(const Acq_Conf& conf_);
+    friend pcps_acquisition_robust_sptr pcps_make_acquisition_robust(const Acq_robust_Conf& conf_);
+    explicit pcps_acquisition_robust(const Acq_robust_Conf& conf_);
     bool d_active;
     bool d_worker_active;
     bool d_cshort;
     bool d_step_two;
     bool d_use_CFAR_algorithm_flag;
     bool d_dump;
+    bool d_huber_time;
+    bool d_huber_frequency;
+    bool d_signum_time;
+    bool d_signum_frequency;
+    bool d_myriad_time;
+    bool d_myriad_frequency;
     int32_t d_state;
     int32_t d_positive_acq;
     uint32_t d_channel;
@@ -244,24 +250,33 @@ private:
     int64_t d_dump_number;
     float d_threshold;
     float d_mag;
+    std::complex<float> d_myriad_para;
+    std::complex<float> d_huber_tunning;
     float d_input_power;
     float d_test_statistics;
     float d_doppler_center_step_two;
+    std::complex<float> d_mad;
     std::string d_dump_filename;
     volk_gnsssdr::vector<volk_gnsssdr::vector<float>> d_magnitude_grid;
     volk_gnsssdr::vector<float> d_tmp_buffer;
-    volk_gnsssdr::vector<std::complex<float>> d_input_signal;
-    volk_gnsssdr::vector<std::complex<float>> initial_vector;
     volk_gnsssdr::vector<float> magnitude_vector;
+    volk_gnsssdr::vector<float> d_deviation_vector;
+    volk_gnsssdr::vector<std::complex<float>> d_input_signal;
+    volk_gnsssdr::vector<std::complex<float>> d_input_signal_sort;
+    volk_gnsssdr::vector<std::complex<float>> initial_vector;
+    volk_gnsssdr::vector<std::complex<float>> frequency_internal_vector;
+    volk_gnsssdr::vector<std::complex<float>> magnitude_complex_vector;
+    volk_gnsssdr::vector<std::complex<float>> d_median_vector;
     volk_gnsssdr::vector<volk_gnsssdr::vector<std::complex<float>>> d_grid_doppler_wipeoffs;
     volk_gnsssdr::vector<volk_gnsssdr::vector<std::complex<float>>> d_grid_doppler_wipeoffs_step_two;
+    volk_gnsssdr::vector<std::complex<float>> d_deviation_complex_vector;
     volk_gnsssdr::vector<std::complex<float>> d_fft_codes;
     volk_gnsssdr::vector<std::complex<float>> d_data_buffer;
     volk_gnsssdr::vector<lv_16sc_t> d_data_buffer_sc;
     std::shared_ptr<gr::fft::fft_complex> d_fft_if;
     std::shared_ptr<gr::fft::fft_complex> d_ifft;
     std::weak_ptr<ChannelFsm> d_channel_fsm;
-    Acq_Conf acq_parameters;
+    Acq_robust_Conf acq_parameters;
     Gnss_Synchro* d_gnss_synchro;
     arma::fmat grid_;
     arma::fmat narrow_grid_;

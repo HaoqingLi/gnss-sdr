@@ -858,7 +858,6 @@ void pcps_acquisition::acquisition_core(uint64_t samp_count)
                 }
         }
     d_worker_active = false;
-
     if ((d_num_noncoherent_integrations_counter == acq_parameters.max_dwells) or (d_positive_acq == 1))
         {
             // Record results to file if required

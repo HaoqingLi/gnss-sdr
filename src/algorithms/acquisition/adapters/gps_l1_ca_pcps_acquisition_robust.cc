@@ -24,7 +24,7 @@
 
 #include "gps_l1_ca_pcps_acquisition_robust.h"
 #include "GPS_L1_CA.h"
-#include "acq_conf.h"
+#include "acq_robust_conf.h"
 #include "configuration_interface.h"
 #include "gnss_sdr_flags.h"
 #include "gps_sdr_signal_processing.h"
@@ -50,7 +50,6 @@ GpsL1CaPcpsAcquisitionrobust::GpsL1CaPcpsAcquisitionrobust(
     configuration_ = configuration;
     acq_parameters_.ms_per_code = 1;
     acq_parameters_.SetFromConfiguration(configuration_, role, GPS_L1_CA_CODE_RATE_CPS, GPS_L1_CA_OPT_ACQ_FS_SPS);
-
     DLOG(INFO) << "role " << role;
 
     if (FLAGS_doppler_max != 0)
