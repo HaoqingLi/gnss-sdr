@@ -47,12 +47,8 @@ Acq_robust_Conf::Acq_robust_Conf()
     bit_transition_flag = false;
     use_CFAR_algorithm_flag = true;
     dump = false;
-    huber_time= false;
-    huber_frequency=false;
-    signum_time=false;
-    signum_frequency=false;
-    myriad_time=false;
-    myriad_frequency=false;
+    time_method= "";
+    frequency_method="";
     blocking = true;
     make_2_steps = false;
     dump_filename = "";
@@ -88,7 +84,10 @@ void Acq_robust_Conf::SetFromConfiguration(ConfigurationInterface *configuration
     dump_channel = configuration->property(role + ".dump_channel", dump_channel);
     blocking = configuration->property(role + ".blocking", blocking);
     dump_filename = configuration->property(role + ".dump_filename", dump_filename);
-
+    time_method = configuration->property(role + ".time_method", time_method);
+    frequency_method = configuration->property(role + ".frequency_method", frequency_method);
+    myriad_para = configuration->property(role + ".myriad_para", myriad_para);
+    huber_tunning = configuration->property(role + ".huber_tunning", huber_tunning);
     use_automatic_resampler = configuration->property("GNSS-SDR.use_acquisition_resampler", use_automatic_resampler);
 
     if ((sampled_ms % ms_per_code) != 0)

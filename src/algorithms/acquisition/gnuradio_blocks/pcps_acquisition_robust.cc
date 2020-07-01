@@ -69,7 +69,7 @@ pcps_acquisition_robust_sptr pcps_make_acquisition_robust(const Acq_robust_Conf&
 }
 
 
-pcps_acquisition_robust::pcps_acquisition_robust(const Acq_robust_Conf& conf_) : gr::block("pcps_acquisition",
+pcps_acquisition_robust::pcps_acquisition_robust(const Acq_robust_Conf& conf_) : gr::block("pcps_acquisition_robust",
                                                                                      gr::io_signature::make(1, 1, conf_.it_size),
                                                                                      gr::io_signature::make(0, 0, conf_.it_size))
 {
@@ -162,12 +162,8 @@ pcps_acquisition_robust::pcps_acquisition_robust(const Acq_robust_Conf& conf_) :
     d_dump_number = 0LL;
     d_dump_channel = acq_parameters.dump_channel;
     d_dump = acq_parameters.dump;
-    d_huber_time = acq_parameters.huber_time;
-    d_huber_frequency = acq_parameters.huber_frequency;
-    d_signum_time = acq_parameters.signum_time;
-    d_signum_frequency = acq_parameters.signum_frequency;
-    d_myriad_time = acq_parameters.myriad_time;
-    d_myriad_frequency = acq_parameters.myriad_frequency;
+    d_time_method = acq_parameters.time_method;
+    d_frequency_method =acq_parameters.frequency_method;
     d_myriad_para = gr_complex(acq_parameters.myriad_para , 0.0);
     d_huber_tunning = gr_complex(acq_parameters.huber_tunning , 0.0);
     d_dump_filename = acq_parameters.dump_filename;
@@ -652,6 +648,7 @@ void pcps_acquisition_robust::acquisition_core(uint64_t samp_count)
     int32_t doppler = 0;
     uint32_t indext = 0U;
     int32_t effective_fft_size = (acq_parameters.bit_transition_flag ? d_fft_size / 2 : d_fft_size);
+    
     if (d_cshort)
         {
             volk_gnsssdr_16ic_convert_32fc(d_data_buffer.data(), d_data_buffer_sc.data(), d_consumed_samples);
@@ -664,7 +661,8 @@ void pcps_acquisition_robust::acquisition_core(uint64_t samp_count)
                     d_input_signal[i] = gr_complex(0.0, 0.0);
                 }
         }
-    memcpy( d_input_signal_sort.data(), d_input_signal.data(), d_fft_size);
+    
+    memcpy( d_input_signal_sort.data(), d_input_signal.data(), effective_fft_size * sizeof(gr_complex));
     std::complex<float> d_median=median_value(d_input_signal_sort,d_fft_size);
      for (uint32_t i = 0; i < d_fft_size; i++)
                 {
@@ -674,7 +672,7 @@ void pcps_acquisition_robust::acquisition_core(uint64_t samp_count)
      volk_32fc_magnitude_32f(d_deviation_vector.data(), d_input_signal_sort.data(), d_fft_size);
      volk_32fc_32f_add_32fc(d_deviation_complex_vector.data(), initial_vector.data(), d_deviation_vector.data(), d_fft_size);
      d_mad = median_value(d_deviation_complex_vector,d_fft_size);
-    if (d_signum_time)
+    if (d_time_method == "signum")
         {
             volk_32fc_magnitude_32f(magnitude_vector.data(), d_input_signal.data(), d_fft_size);
             volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), d_fft_size);
@@ -685,7 +683,7 @@ void pcps_acquisition_robust::acquisition_core(uint64_t samp_count)
         }
         
 
-    if (d_myriad_time)
+    if (d_time_method == "myriad")
         {
             volk_32fc_magnitude_32f(magnitude_vector.data(), d_input_signal.data(), d_fft_size);
             volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), d_fft_size);
@@ -696,7 +694,7 @@ void pcps_acquisition_robust::acquisition_core(uint64_t samp_count)
                 }
         }
 
-    if (d_huber_time)
+    if (d_time_method == "huber" )
         {
             volk_32fc_magnitude_32f(magnitude_vector.data(), d_input_signal.data(), d_fft_size);
             volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), d_fft_size);
@@ -709,7 +707,66 @@ void pcps_acquisition_robust::acquisition_core(uint64_t samp_count)
                    }  
                 }
         }
+     memcpy(d_fft_if->get_inbuf(), d_input_signal.data(), effective_fft_size * sizeof(gr_complex));
+     d_fft_if->execute();
+     memcpy(frequency_internal_vector.data(), d_fft_if->get_outbuf(), effective_fft_size * sizeof(gr_complex));
+     volk_32fc_magnitude_32f(magnitude_vector.data(), frequency_internal_vector.data(), d_fft_size);
+     volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), d_fft_size);
+     memcpy( d_input_signal_sort.data(), frequency_internal_vector.data(), effective_fft_size * sizeof(gr_complex));
+     d_median=median_value(d_input_signal_sort,d_fft_size);
+     for (uint32_t i = 0; i < d_fft_size; i++)
+		{
+		    d_median_vector[i] = -d_median;
+		}
+     volk_32fc_x2_add_32fc(d_input_signal_sort.data(), d_input_signal_sort.data(), d_median_vector.data(), d_fft_size);
+     volk_32fc_magnitude_32f(d_deviation_vector.data(), d_input_signal_sort.data(), d_fft_size);
+     volk_32fc_32f_add_32fc(d_deviation_complex_vector.data(), initial_vector.data(), d_deviation_vector.data(), d_fft_size);
+     d_mad = median_value(d_deviation_complex_vector,d_fft_size);
+    if (d_frequency_method == "signum")
+        {
+            
+            for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                    frequency_internal_vector[i] = frequency_internal_vector[i] / magnitude_complex_vector[i];
+                }
+        }
+
+        
+    if (d_frequency_method == "myriad")
+        {
+            std::complex<float> K = d_myriad_para * d_mad * d_mad / gr_complex(0.6745, 0.0) / gr_complex(0.6745, 0.0);
+        
+            for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                    frequency_internal_vector[i] = K*frequency_internal_vector[i] / (K+magnitude_complex_vector[i]*magnitude_complex_vector[i]);
+                }
+                
+        }
+        
+    if (d_frequency_method == "huber")
+        {
+            std::complex<float> sigma_tunning = d_huber_tunning * d_mad / gr_complex(0.6745, 0.0);
+            for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                     if(std::fabs(frequency_internal_vector[i])>std::fabs(sigma_tunning))
+                     {
+                          frequency_internal_vector[i] = sigma_tunning * frequency_internal_vector[i] / magnitude_complex_vector[i];
+                     }
+
+                }
+        }
+    memcpy(d_ifft->get_inbuf(), frequency_internal_vector.data(), effective_fft_size * sizeof(gr_complex));
+    d_ifft->execute();
+    memcpy( d_input_signal.data(), d_ifft->get_outbuf(),effective_fft_size * sizeof(gr_complex));
+        float size_float=d_fft_size;
+    for (uint32_t i = 0; i < d_fft_size; i++)
+        {
+            //d_input_signal[i] = d_input_signal[i] / gr_complex(size_float,0.0);
+            d_input_signal[i] = d_input_signal[i] / gr_complex(1.0,0.0);
+        }
+     //std::cout<<d_input_signal[12].real()<<"real"<<d_input_signal[12].imag()<<"end for acquisition"<<d_cshort<<std::endl;   
     const gr_complex* in = d_input_signal.data();  // Get the input samples pointer
+    
 
     d_mag = 0.0;
     d_num_noncoherent_integrations_counter++;
@@ -747,53 +804,7 @@ void pcps_acquisition_robust::acquisition_core(uint64_t samp_count)
 
                     // Compute the inverse FFT
                     d_ifft->execute();
-                    volk_32fc_magnitude_32f(magnitude_vector.data(), d_ifft->get_outbuf(), d_fft_size);
-                    volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), d_fft_size);
-                    memcpy(frequency_internal_vector.data(), d_ifft->get_outbuf(), d_fft_size);
-                    memcpy( d_input_signal_sort.data(), frequency_internal_vector.data(), d_fft_size);
-                    d_median=median_value(d_input_signal_sort,d_fft_size);
-		     for (uint32_t i = 0; i < d_fft_size; i++)
-				{
-				    d_median_vector[i] = -d_median;
-				}
-		     volk_32fc_x2_add_32fc(d_input_signal_sort.data(), d_input_signal_sort.data(), d_median_vector.data(), d_fft_size);
-		     volk_32fc_magnitude_32f(d_deviation_vector.data(), d_input_signal_sort.data(), d_fft_size);
-		     volk_32fc_32f_add_32fc(d_deviation_complex_vector.data(), initial_vector.data(), d_deviation_vector.data(), d_fft_size);
-                     d_mad = median_value(d_deviation_complex_vector,d_fft_size);
-                    if (d_signum_frequency)
-                        {
-                            
-                            for (uint32_t i = 0; i < d_fft_size; i++)
-                                {
-                                    frequency_internal_vector[i] = frequency_internal_vector[i] / magnitude_complex_vector[i];
-                                }
-                        }
-             
-                        
-                    if (d_myriad_frequency)
-                        {
-                            std::complex<float> K = d_myriad_para * d_mad * d_mad / gr_complex(0.6745, 0.0) / gr_complex(0.6745, 0.0);
-                        
-                            for (uint32_t i = 0; i < d_fft_size; i++)
-                                {
-                                    frequency_internal_vector[i] = K*frequency_internal_vector[i] / (K+magnitude_complex_vector[i]*magnitude_complex_vector[i]);
-                                }
-                                
-                        }
-                        
-                    if (d_huber_frequency)
-                        {
-                            std::complex<float> sigma_tunning = d_huber_tunning * d_mad / gr_complex(0.6745, 0.0);
-                            for (uint32_t i = 0; i < d_fft_size; i++)
-                                {
-                                     if(std::fabs(frequency_internal_vector[i])>std::fabs(sigma_tunning))
-                                     {
-                                          frequency_internal_vector[i] = sigma_tunning * frequency_internal_vector[i] / magnitude_complex_vector[i];
-                                     }
 
-                                }
-                        }
-                    memcpy(d_ifft->get_inbuf(), frequency_internal_vector.data(), d_fft_size);
                     // Compute squared magnitude (and accumulate in case of non-coherent integration)
                     size_t offset = (acq_parameters.bit_transition_flag ? effective_fft_size : 0);
                     if (d_num_noncoherent_integrations_counter == 1)
@@ -1117,8 +1128,7 @@ int pcps_acquisition_robust::general_work(int noutput_items __attribute__((unuse
                                 buff_increment = d_consumed_samples - d_buffer_count;
                             }
                         memcpy(&d_data_buffer[d_buffer_count], in, sizeof(gr_complex) * buff_increment);
-                    }
-
+                    }   
                 // If buffer will be full in next iteration
                 if (d_buffer_count >= d_consumed_samples)
                     {

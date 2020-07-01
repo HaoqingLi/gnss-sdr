@@ -76,6 +76,7 @@ namespace own = gsl;
 #endif
 
 class Gnss_Synchro;
+
 class pcps_acquisition_robust;
 
 #if GNURADIO_USES_STD_POINTERS
@@ -226,12 +227,6 @@ private:
     bool d_step_two;
     bool d_use_CFAR_algorithm_flag;
     bool d_dump;
-    bool d_huber_time;
-    bool d_huber_frequency;
-    bool d_signum_time;
-    bool d_signum_frequency;
-    bool d_myriad_time;
-    bool d_myriad_frequency;
     int32_t d_state;
     int32_t d_positive_acq;
     uint32_t d_channel;
@@ -257,6 +252,8 @@ private:
     float d_doppler_center_step_two;
     std::complex<float> d_mad;
     std::string d_dump_filename;
+    std::string d_time_method;
+    std::string d_frequency_method;
     volk_gnsssdr::vector<volk_gnsssdr::vector<float>> d_magnitude_grid;
     volk_gnsssdr::vector<float> d_tmp_buffer;
     volk_gnsssdr::vector<float> magnitude_vector;

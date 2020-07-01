@@ -18,6 +18,7 @@ set(ACQ_ADAPTER_SOURCES
     gps_l2_m_pcps_acquisition.cc
     gps_l5i_pcps_acquisition.cc
     galileo_e1_pcps_ambiguous_acquisition.cc
+    galileo_e1_pcps_ambiguous_acquisition_robust.cc
     galileo_e1_pcps_cccwsr_ambiguous_acquisition.cc
     galileo_e1_pcps_quicksync_ambiguous_acquisition.cc
     galileo_e1_pcps_tong_ambiguous_acquisition.cc
@@ -40,6 +41,7 @@ set(ACQ_ADAPTER_HEADERS
     gps_l2_m_pcps_acquisition.h
     gps_l5i_pcps_acquisition.h
     galileo_e1_pcps_ambiguous_acquisition.h
+    galileo_e1_pcps_ambiguous_acquisition_robust.h
     galileo_e1_pcps_cccwsr_ambiguous_acquisition.h
     galileo_e1_pcps_quicksync_ambiguous_acquisition.h
     galileo_e1_pcps_tong_ambiguous_acquisition.h

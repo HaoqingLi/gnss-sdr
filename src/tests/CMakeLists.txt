@@ -896,7 +896,9 @@ if(NOT ENABLE_PACKAGING AND NOT ENABLE_FPGA)
     add_executable(acq_test
         ${CMAKE_CURRENT_SOURCE_DIR}/single_test_main.cc
         ${CMAKE_CURRENT_SOURCE_DIR}/unit-tests/signal-processing-blocks/acquisition/gps_l1_ca_pcps_acquisition_test.cc
+        #${CMAKE_CURRENT_SOURCE_DIR}/unit-tests/signal-processing-blocks/acquisition/gps_l1_ca_pcps_acquisition_test_robust.cc
     )
+    
     if(${FILESYSTEM_FOUND})
         target_compile_definitions(acq_test PRIVATE -DHAS_STD_FILESYSTEM=1)
         target_link_libraries(acq_test PRIVATE std::filesystem)

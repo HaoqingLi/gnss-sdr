@@ -53,12 +53,6 @@ public:
     bool bit_transition_flag;
     bool use_CFAR_algorithm_flag;
     bool dump;
-    bool huber_time;
-    bool huber_frequency;
-    bool signum_time;
-    bool signum_frequency;
-    bool myriad_time;
-    bool myriad_frequency;
     bool blocking;
     bool blocking_on_standby;  // enable it only for unit testing to avoid sample consume on idle status
     bool make_2_steps;
@@ -67,6 +61,8 @@ public:
     int64_t resampled_fs;
     uint32_t resampler_latency_samples;
     std::string dump_filename;
+    std::string time_method;
+    std::string frequency_method;
     uint32_t dump_channel;
     size_t it_size;
     std::string item_type;
