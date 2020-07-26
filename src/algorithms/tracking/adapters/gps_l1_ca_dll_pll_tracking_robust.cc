@@ -28,7 +28,7 @@
 #include "GPS_L1_CA.h"
 #include "configuration_interface.h"
 #include "display.h"
-#include "dll_pll_conf.h"
+#include "dll_pll_robust_conf.h"
 #include "gnss_sdr_flags.h"
 #include <glog/logging.h>
 #include <array>
@@ -37,7 +37,7 @@ GpsL1CaDllPllTrackingrobust::GpsL1CaDllPllTrackingrobust(
     ConfigurationInterface* configuration, const std::string& role,
     unsigned int in_streams, unsigned int out_streams) : role_(role), in_streams_(in_streams), out_streams_(out_streams)
 {
-    Dll_Pll_Conf trk_params = Dll_Pll_Conf();
+    Dll_Pll_robust_Conf trk_params = Dll_Pll_robust_Conf();
     DLOG(INFO) << "role " << role;
     trk_params.SetFromConfiguration(configuration, role);
 

@@ -761,13 +761,14 @@ void pcps_acquisition_robust::acquisition_core(uint64_t samp_count)
         float size_float=d_fft_size;
     for (uint32_t i = 0; i < d_fft_size; i++)
         {
-            //d_input_signal[i] = d_input_signal[i] / gr_complex(size_float,0.0);
-            d_input_signal[i] = d_input_signal[i] / gr_complex(1.0,0.0);
+            d_input_signal[i] = d_input_signal[i] / gr_complex(size_float,0.0);
+            //d_input_signal[i] = d_input_signal[i] / gr_complex(1.0,0.0);
         }
      //std::cout<<d_input_signal[12].real()<<"real"<<d_input_signal[12].imag()<<"end for acquisition"<<d_cshort<<std::endl;   
     const gr_complex* in = d_input_signal.data();  // Get the input samples pointer
     
-
+    //std::cout<<in[12]<<"end for int"<<std::endl;
+    
     d_mag = 0.0;
     d_num_noncoherent_integrations_counter++;
 

@@ -49,6 +49,7 @@
 #include <gnuradio/thread/thread.h>  // for scoped_lock
 #include <matio.h>                   // for Mat_VarCreate
 #include <pmt/pmt_sugar.h>           // for mp
+#include <volk/volk.h>
 #include <volk_gnsssdr/volk_gnsssdr.h>
 #include <algorithm>  // for fill_n
 #include <array>
@@ -78,13 +79,13 @@ namespace fs = boost::filesystem;
 #endif
 
 
-dll_pll_veml_tracking_robust_sptr dll_pll_veml_make_tracking_robust(const Dll_Pll_Conf &conf_)
+dll_pll_veml_tracking_robust_sptr dll_pll_veml_make_tracking_robust(const Dll_Pll_robust_Conf &conf_)
 {
     return dll_pll_veml_tracking_robust_sptr(new dll_pll_veml_tracking_robust(conf_));
 }
 
 
-dll_pll_veml_tracking_robust::dll_pll_veml_tracking_robust(const Dll_Pll_Conf &conf_) : gr::block("dll_pll_veml_tracking_robust", gr::io_signature::make(1, 1, sizeof(gr_complex)),
+dll_pll_veml_tracking_robust::dll_pll_veml_tracking_robust(const Dll_Pll_robust_Conf &conf_) : gr::block("dll_pll_veml_tracking_robust", gr::io_signature::make(1, 1, sizeof(gr_complex)),
                                                                               gr::io_signature::make(1, 1, sizeof(Gnss_Synchro)))
 {
     // prevent telemetry symbols accumulation in output buffers
@@ -130,6 +131,25 @@ dll_pll_veml_tracking_robust::dll_pll_veml_tracking_robust(const Dll_Pll_Conf &c
     map_signal_pretty_name["B3"] = "B3I";
 
     signal_pretty_name = map_signal_pretty_name[signal_type];
+    
+    d_input_signal = volk_gnsssdr::vector<std::complex<float>>(trk_parameters.vector_length);
+    d_input_signal_sort = volk_gnsssdr::vector<std::complex<float>>(trk_parameters.vector_length);
+    initial_vector = volk_gnsssdr::vector<std::complex<float>>(trk_parameters.vector_length);
+    d_median_vector = volk_gnsssdr::vector<std::complex<float>>(trk_parameters.vector_length);
+    d_deviation_complex_vector = volk_gnsssdr::vector<std::complex<float>>(trk_parameters.vector_length);
+    d_deviation_vector = volk_gnsssdr::vector<float>(trk_parameters.vector_length);
+    magnitude_vector = volk_gnsssdr::vector<float>(trk_parameters.vector_length);
+    magnitude_complex_vector = volk_gnsssdr::vector<std::complex<float>>(trk_parameters.vector_length);
+    frequency_internal_vector = volk_gnsssdr::vector<std::complex<float>>(trk_parameters.vector_length);
+    // Direct FFT
+    d_fft_if = std::make_shared<gr::fft::fft_complex>(trk_parameters.vector_length, true);
+
+    // Inverse FFT
+    d_ifft = std::make_shared<gr::fft::fft_complex>(trk_parameters.vector_length, false);
+    d_time_method = trk_parameters.time_method;
+    d_frequency_method =trk_parameters.frequency_method;
+    d_myriad_para = gr_complex(trk_parameters.myriad_para , 0.0);
+    d_huber_tunning = gr_complex(trk_parameters.huber_tunning , 0.0);
 
     if (trk_parameters.system == 'G')
         {
@@ -506,6 +526,7 @@ dll_pll_veml_tracking_robust::dll_pll_veml_tracking_robust(const Dll_Pll_Conf &c
 
     d_dump = trk_parameters.dump;
     d_dump_mat = trk_parameters.dump_mat and d_dump;
+
     if (d_dump)
         {
             d_dump_filename = trk_parameters.dump_filename;
@@ -911,6 +932,24 @@ bool dll_pll_veml_tracking_robust::cn0_and_tracking_lock_status(double coh_integ
 }
 
 
+bool absolutevalue_sort_tracking(std::complex<float> a, std::complex<float> b)
+{
+   
+    return std::fabs(a) < std::fabs(b); 
+}
+
+std::complex<float> median_value_tracking(volk_gnsssdr::vector<std::complex<float>> input, uint32_t size) 
+{ 
+    std::sort(input.begin(),input.end(),absolutevalue_sort_tracking);
+    if (size % 2 != 0) 
+        return (std::complex<float>)input[size / 2]; 
+  
+    return (std::complex<float>)(input[(size - 1) / 2] + input[size / 2]) / gr_complex(2.0, 0.0); 
+} 
+
+
+
+
 // correlation requires:
 // - updated remnant carrier phase in radians (rem_carr_phase_rad)
 // - updated remnant code phase in samples (d_rem_code_phase_samples)
@@ -918,6 +957,7 @@ bool dll_pll_veml_tracking_robust::cn0_and_tracking_lock_status(double coh_integ
 // - d_carrier_doppler_hz
 void dll_pll_veml_tracking_robust::do_correlation_step(const gr_complex *input_samples)
 {
+
     // ################# CARRIER WIPEOFF AND CORRELATORS ##############################
     // perform carrier wipe-off and compute Early, Prompt and Late correlation
     multicorrelator_cpu.set_input_output_vectors(d_correlator_outs.data(), input_samples);
@@ -1599,14 +1639,138 @@ void dll_pll_veml_tracking_robust::stop_tracking()
 }
 
 
+
 int dll_pll_veml_tracking_robust::general_work(int noutput_items __attribute__((unused)), gr_vector_int &ninput_items,
     gr_vector_const_void_star &input_items, gr_vector_void_star &output_items)
 {
     gr::thread::scoped_lock l(d_setlock);
-    const auto *in = reinterpret_cast<const gr_complex *>(input_items[0]);
+    const auto *intemp = reinterpret_cast<const gr_complex *>(input_items[0]);
     auto **out = reinterpret_cast<Gnss_Synchro **>(&output_items[0]);
     Gnss_Synchro current_synchro_data = Gnss_Synchro();
     current_synchro_data.Flag_valid_symbol_output = false;
+
+
+
+
+//################# Precorrelation Robust processing ##############################
+
+    for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+            {
+                  d_input_signal[i] = intemp[i];
+             }
+
+    memcpy( d_input_signal_sort.data(), d_input_signal.data(), trk_parameters.vector_length * sizeof(gr_complex));
+    std::complex<float> d_median=median_value_tracking(d_input_signal_sort,trk_parameters.vector_length);
+    for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+	        {
+	            d_median_vector[i] = -d_median;
+	        }
+    volk_32fc_x2_add_32fc(d_input_signal_sort.data(), d_input_signal_sort.data(), d_median_vector.data(), trk_parameters.vector_length);
+    volk_32fc_magnitude_32f(d_deviation_vector.data(), d_input_signal_sort.data(), trk_parameters.vector_length);
+    volk_32fc_32f_add_32fc(d_deviation_complex_vector.data(), initial_vector.data(), d_deviation_vector.data(), trk_parameters.vector_length);
+    d_mad = median_value_tracking(d_deviation_complex_vector,trk_parameters.vector_length);
+    volk_32fc_magnitude_32f(magnitude_vector.data(), d_input_signal.data(), trk_parameters.vector_length);
+    volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), trk_parameters.vector_length);
+ 
+    if (d_time_method == "signum")
+	{
+	   
+	   std::complex<float> bias_zero =  gr_complex(std::pow(10.0, -20), 0.0);
+	    for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+	        {
+	            d_input_signal[i] = d_input_signal[i] / (magnitude_complex_vector[i] + bias_zero);
+
+	        }
+	}
+	
+    if (d_time_method == "myriad")
+	{
+
+	    std::complex<float> K = d_myriad_para * d_mad * d_mad / gr_complex(0.6745, 0.0) / gr_complex(0.6745, 0.0);
+	    for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+	        {
+	            d_input_signal[i] = K*d_input_signal[i] / (K+magnitude_complex_vector[i]*magnitude_complex_vector[i]);
+	        }
+	}
+
+    if (d_time_method == "huber" )
+	{
+
+            std::complex<float> sigma_tunning = d_huber_tunning * d_mad / gr_complex(0.6745, 0.0);
+            for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+                {
+                   if(std::fabs(d_input_signal[i])>std::fabs(sigma_tunning))
+                   {
+                       d_input_signal[i] = sigma_tunning * d_input_signal[i] / magnitude_complex_vector[i];
+                   }  
+                }
+	}
+     memcpy(d_fft_if->get_inbuf(), d_input_signal.data(), trk_parameters.vector_length * sizeof(gr_complex));
+     d_fft_if->execute();
+     memcpy(frequency_internal_vector.data(), d_fft_if->get_outbuf(), trk_parameters.vector_length * sizeof(gr_complex));
+     volk_32fc_magnitude_32f(magnitude_vector.data(), frequency_internal_vector.data(), trk_parameters.vector_length);
+     volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), trk_parameters.vector_length);
+     memcpy( d_input_signal_sort.data(), frequency_internal_vector.data(), trk_parameters.vector_length * sizeof(gr_complex));
+     d_median=median_value_tracking(d_input_signal_sort,trk_parameters.vector_length);
+     for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+		{
+		    d_median_vector[i] = -d_median;
+		}
+     volk_32fc_x2_add_32fc(d_input_signal_sort.data(), d_input_signal_sort.data(), d_median_vector.data(), trk_parameters.vector_length);
+     volk_32fc_magnitude_32f(d_deviation_vector.data(), d_input_signal_sort.data(), trk_parameters.vector_length);
+     volk_32fc_32f_add_32fc(d_deviation_complex_vector.data(), initial_vector.data(), d_deviation_vector.data(), trk_parameters.vector_length);
+     d_mad = median_value_tracking(d_deviation_complex_vector,trk_parameters.vector_length);
+    if (d_frequency_method == "signum")
+	{
+	    
+	    for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+	        {
+	            frequency_internal_vector[i] = frequency_internal_vector[i] / magnitude_complex_vector[i];
+	        }	        
+	}
+
+	
+    if (d_frequency_method == "myriad")
+	{
+	    std::complex<float> K = d_myriad_para * d_mad * d_mad / gr_complex(0.6745, 0.0) / gr_complex(0.6745, 0.0);
+	
+	    for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+	        {
+	            frequency_internal_vector[i] = K*frequency_internal_vector[i] / (K+magnitude_complex_vector[i]*magnitude_complex_vector[i]);
+	        }
+	        
+	}
+	
+    if (d_frequency_method == "huber")
+	{
+	    std::complex<float> sigma_tunning = d_huber_tunning * d_mad / gr_complex(0.6745, 0.0);
+	    for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+	        {
+	             if(std::fabs(frequency_internal_vector[i])>std::fabs(sigma_tunning))
+	             {
+	                  frequency_internal_vector[i] = sigma_tunning * frequency_internal_vector[i] / magnitude_complex_vector[i];
+	             }
+
+	        }
+	}
+    memcpy(d_ifft->get_inbuf(), frequency_internal_vector.data(), trk_parameters.vector_length * sizeof(gr_complex));
+    d_ifft->execute();
+    memcpy( d_input_signal.data(), d_ifft->get_outbuf(),trk_parameters.vector_length * sizeof(gr_complex));
+    float size_float=trk_parameters.vector_length;
+    for (uint32_t i = 0; i < trk_parameters.vector_length; i++)
+	{
+	    d_input_signal[i] = d_input_signal[i] / gr_complex(size_float,0.0);
+	    //d_input_signal[i] = d_input_signal[i] / gr_complex(1.0,0.0);
+	}
+     //std::cout<<d_input_signal[12].real()<<"real"<<d_input_signal[12].imag()<<"end for acquisition"<<d_cshort<<std::endl;   
+     const gr_complex* in = d_input_signal.data();  // Get the input samples pointer
+     //std::cout<<"wrong point"<<std::endl;
+
+
+
+
+
+
 
     if (d_pull_in_transitory == true)
         {

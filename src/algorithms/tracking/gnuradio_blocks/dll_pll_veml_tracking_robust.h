@@ -22,7 +22,8 @@
 #define GNSS_SDR_DLL_PLL_VEML_TRACKING_ROBUST_H
 
 #include "cpu_multicorrelator_real_codes.h"
-#include "dll_pll_conf.h"
+#include "dll_pll_robust_conf.h"
+#include <gnuradio/fft/fft.h>
 #include "exponential_smoother.h"
 #include "tracking_FLL_PLL_filter.h"  // for PLL/FLL filter
 #include "tracking_loop_filter.h"     // for DLL filter
@@ -36,6 +37,8 @@
 #include <fstream>                            // for string, ofstream
 #include <string>
 #include <utility>  // for pair
+#include <complex>
+
 #if GNURADIO_USES_STD_POINTERS
 #include <memory>
 #else
@@ -52,7 +55,7 @@ using dll_pll_veml_tracking_robust_sptr = boost::shared_ptr<dll_pll_veml_trackin
 #endif
 
 
-dll_pll_veml_tracking_robust_sptr dll_pll_veml_make_tracking_robust(const Dll_Pll_Conf &conf_);
+dll_pll_veml_tracking_robust_sptr dll_pll_veml_make_tracking_robust(const Dll_Pll_robust_Conf &conf_);
 
 /*!
  * \brief This class implements a code DLL + carrier PLL tracking block.
@@ -73,9 +76,9 @@ public:
     void forecast(int noutput_items, gr_vector_int &ninput_items_required);
 
 private:
-    friend dll_pll_veml_tracking_robust_sptr dll_pll_veml_make_tracking_robust(const Dll_Pll_Conf &conf_);
+    friend dll_pll_veml_tracking_robust_sptr dll_pll_veml_make_tracking_robust(const Dll_Pll_robust_Conf &conf_);
     void msg_handler_telemetry_to_trk(const pmt::pmt_t &msg);
-    explicit dll_pll_veml_tracking_robust(const Dll_Pll_Conf &conf_);
+    explicit dll_pll_veml_tracking_robust(const Dll_Pll_robust_Conf &conf_);
 
     bool cn0_and_tracking_lock_status(double coh_integration_time_s);
     bool acquire_secondary();
@@ -89,7 +92,7 @@ private:
     int32_t save_matfile();
 
     // tracking configuration vars
-    Dll_Pll_Conf trk_parameters;
+    Dll_Pll_robust_Conf trk_parameters;
     bool d_veml;
     bool d_cloop;
     uint32_t d_channel;
@@ -215,6 +218,23 @@ private:
     std::string d_dump_filename;
     bool d_dump;
     bool d_dump_mat;
+    
+    std::complex<float> d_mad;
+    volk_gnsssdr::vector<float> magnitude_vector;
+    volk_gnsssdr::vector<float> d_deviation_vector;
+    volk_gnsssdr::vector<std::complex<float>> d_input_signal;
+    volk_gnsssdr::vector<std::complex<float>> d_input_signal_sort;
+    volk_gnsssdr::vector<std::complex<float>> initial_vector;
+    volk_gnsssdr::vector<std::complex<float>> frequency_internal_vector;
+    volk_gnsssdr::vector<std::complex<float>> magnitude_complex_vector;
+    volk_gnsssdr::vector<std::complex<float>> d_median_vector;
+    volk_gnsssdr::vector<std::complex<float>> d_deviation_complex_vector;
+    std::shared_ptr<gr::fft::fft_complex> d_fft_if;
+    std::shared_ptr<gr::fft::fft_complex> d_ifft;
+    std::complex<float> d_myriad_para;
+    std::complex<float> d_huber_tunning;
+    std::string d_time_method;
+    std::string d_frequency_method;
 };
 
 #endif  // GNSS_SDR_DLL_PLL_VEML_TRACKING_H
