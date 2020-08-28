@@ -47,8 +47,8 @@ Acq_robust_Conf::Acq_robust_Conf()
     bit_transition_flag = false;
     use_CFAR_algorithm_flag = true;
     dump = false;
-    time_method= "";
-    frequency_method="";
+    time_method= "none";
+    frequency_method="none";
     blocking = true;
     make_2_steps = false;
     dump_filename = "";

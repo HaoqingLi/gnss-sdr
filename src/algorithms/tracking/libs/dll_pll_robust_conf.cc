@@ -57,8 +57,8 @@ Dll_Pll_robust_Conf::Dll_Pll_robust_Conf()
     y_intercept = 1.0;
     myriad_para=6.0;
     huber_tunning=1.345;
-    time_method= "";
-    frequency_method="";
+    time_method= "none";
+    frequency_method="none";
     carrier_aiding = true;
     extend_correlation_symbols = 1;
     cn0_samples = FLAGS_cn0_samples;
