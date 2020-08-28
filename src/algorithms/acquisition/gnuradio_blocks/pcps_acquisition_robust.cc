@@ -22,7 +22,7 @@
  * -------------------------------------------------------------------------
  */
 
-#include "pcps_acquisition.h"
+#include "pcps_acquisition_robust.h"
 #include "GLONASS_L1_L2_CA.h"  // for GLONASS_TWO_PI
 #include "GPS_L1_CA.h"         // for GPS_TWO_PI
 #include "gnss_frequencies.h"
@@ -46,9 +46,11 @@
 #include <volk_gnsssdr/volk_gnsssdr.h>
 #include <algorithm>  // for fill_n, min
 #include <array>
-#include <cmath>    // for floor, fmod, rint, ceil
+#include <cmath>  // for floor, fmod, rint, ceil
+#include <complex>
 #include <cstring>  // for memcpy
 #include <iostream>
+#include <math.h>  
 #include <map>
 
 #if HAS_STD_FILESYSTEM
@@ -61,16 +63,15 @@ namespace fs = std::filesystem;
 namespace fs = boost::filesystem;
 #endif
 
-
-pcps_acquisition_sptr pcps_make_acquisition(const Acq_Conf& conf_)
+pcps_acquisition_robust_sptr pcps_make_acquisition_robust(const Acq_robust_Conf& conf_)
 {
-    return pcps_acquisition_sptr(new pcps_acquisition(conf_));
+    return pcps_acquisition_robust_sptr(new pcps_acquisition_robust(conf_));
 }
 
 
-pcps_acquisition::pcps_acquisition(const Acq_Conf& conf_) : gr::block("pcps_acquisition",
-                                                                gr::io_signature::make(1, 1, conf_.it_size),
-                                                                gr::io_signature::make(0, 0, conf_.it_size))
+pcps_acquisition_robust::pcps_acquisition_robust(const Acq_robust_Conf& conf_) : gr::block("pcps_acquisition_robust",
+                                                                                     gr::io_signature::make(1, 1, conf_.it_size),
+                                                                                     gr::io_signature::make(0, 0, conf_.it_size))
 {
     this->message_port_register_out(pmt::mp("events"));
 
@@ -94,7 +95,7 @@ pcps_acquisition::pcps_acquisition(const Acq_Conf& conf_) : gr::block("pcps_acqu
     d_mag = 0;
     d_input_power = 0.0;
     d_num_doppler_bins = 0U;
-    d_threshold = 0.0;      
+    d_threshold = 0.0;
     d_doppler_step = acq_parameters.doppler_step;
     d_doppler_center = 0U;
     d_doppler_center_step_two = 0.0;
@@ -128,7 +129,15 @@ pcps_acquisition::pcps_acquisition(const Acq_Conf& conf_) : gr::block("pcps_acqu
     d_tmp_buffer = volk_gnsssdr::vector<float>(d_fft_size);
     d_fft_codes = volk_gnsssdr::vector<std::complex<float>>(d_fft_size);
     d_input_signal = volk_gnsssdr::vector<std::complex<float>>(d_fft_size);
-
+    d_input_signal_sort = volk_gnsssdr::vector<std::complex<float>>(d_fft_size);
+    initial_vector = volk_gnsssdr::vector<std::complex<float>>(d_fft_size);
+    d_median_vector = volk_gnsssdr::vector<std::complex<float>>(d_fft_size);
+    d_deviation_complex_vector = volk_gnsssdr::vector<std::complex<float>>(d_fft_size);
+    d_deviation_vector = volk_gnsssdr::vector<float>(d_fft_size);
+    magnitude_vector = volk_gnsssdr::vector<float>(d_fft_size);
+    magnitude_complex_vector = volk_gnsssdr::vector<std::complex<float>>(d_fft_size);
+    frequency_internal_vector = volk_gnsssdr::vector<std::complex<float>>(d_fft_size);
+   
     // Direct FFT
     d_fft_if = std::make_shared<gr::fft::fft_complex>(d_fft_size, true);
 
@@ -153,6 +162,10 @@ pcps_acquisition::pcps_acquisition(const Acq_Conf& conf_) : gr::block("pcps_acqu
     d_dump_number = 0LL;
     d_dump_channel = acq_parameters.dump_channel;
     d_dump = acq_parameters.dump;
+    d_time_method = acq_parameters.time_method;
+    d_frequency_method =acq_parameters.frequency_method;
+    d_myriad_para = gr_complex(acq_parameters.myriad_para , 0.0);
+    d_huber_tunning = gr_complex(acq_parameters.huber_tunning , 0.0);
     d_dump_filename = acq_parameters.dump_filename;
     if (d_dump)
         {
@@ -188,14 +201,14 @@ pcps_acquisition::pcps_acquisition(const Acq_Conf& conf_) : gr::block("pcps_acqu
 }
 
 
-void pcps_acquisition::set_resampler_latency(uint32_t latency_samples)
+void pcps_acquisition_robust::set_resampler_latency(uint32_t latency_samples)
 {
     gr::thread::scoped_lock lock(d_setlock);  // require mutex with work function called by the scheduler
     acq_parameters.resampler_latency_samples = latency_samples;
 }
 
 
-void pcps_acquisition::set_local_code(std::complex<float>* code)
+void pcps_acquisition_robust::set_local_code(std::complex<float>* code)
 {
     // This will check if it's fdma, if yes will update the intermediate frequency and the doppler grid
     if (is_fdma())
@@ -231,7 +244,7 @@ void pcps_acquisition::set_local_code(std::complex<float>* code)
 }
 
 
-bool pcps_acquisition::is_fdma()
+bool pcps_acquisition_robust::is_fdma()
 {
     // reset the intermediate frequency
     d_doppler_bias = 0;
@@ -252,7 +265,7 @@ bool pcps_acquisition::is_fdma()
 }
 
 
-void pcps_acquisition::update_local_carrier(own::span<gr_complex> carrier_vector, float freq)
+void pcps_acquisition_robust::update_local_carrier(own::span<gr_complex> carrier_vector, float freq)
 {
     float phase_step_rad;
     if (acq_parameters.use_automatic_resampler)
@@ -268,7 +281,7 @@ void pcps_acquisition::update_local_carrier(own::span<gr_complex> carrier_vector
 }
 
 
-void pcps_acquisition::init()
+void pcps_acquisition_robust::init()
 {
     d_gnss_synchro->Flag_valid_acquisition = false;
     d_gnss_synchro->Flag_valid_symbol_output = false;
@@ -315,7 +328,7 @@ void pcps_acquisition::init()
 }
 
 
-void pcps_acquisition::update_grid_doppler_wipeoffs()
+void pcps_acquisition_robust::update_grid_doppler_wipeoffs()
 {
     for (uint32_t doppler_index = 0; doppler_index < d_num_doppler_bins; doppler_index++)
         {
@@ -325,7 +338,7 @@ void pcps_acquisition::update_grid_doppler_wipeoffs()
 }
 
 
-void pcps_acquisition::update_grid_doppler_wipeoffs_step2()
+void pcps_acquisition_robust::update_grid_doppler_wipeoffs_step2()
 {
     for (uint32_t doppler_index = 0; doppler_index < d_num_doppler_bins_step2; doppler_index++)
         {
@@ -335,7 +348,7 @@ void pcps_acquisition::update_grid_doppler_wipeoffs_step2()
 }
 
 
-void pcps_acquisition::set_state(int32_t state)
+void pcps_acquisition_robust::set_state(int32_t state)
 {
     gr::thread::scoped_lock lock(d_setlock);  // require mutex with work function called by the scheduler
     d_state = state;
@@ -359,7 +372,7 @@ void pcps_acquisition::set_state(int32_t state)
 }
 
 
-void pcps_acquisition::send_positive_acquisition()
+void pcps_acquisition_robust::send_positive_acquisition()
 {
     // Declare positive acquisition using a message port
     // 0=STOP_CHANNEL 1=ACQ_SUCCEES 2=ACQ_FAIL
@@ -387,7 +400,7 @@ void pcps_acquisition::send_positive_acquisition()
 }
 
 
-void pcps_acquisition::send_negative_acquisition()
+void pcps_acquisition_robust::send_negative_acquisition()
 {
     // Declare negative acquisition using a message port
     // 0=STOP_CHANNEL 1=ACQ_SUCCEES 2=ACQ_FAIL
@@ -405,7 +418,7 @@ void pcps_acquisition::send_negative_acquisition()
 }
 
 
-void pcps_acquisition::dump_results(int32_t effective_fft_size)
+void pcps_acquisition_robust::dump_results(int32_t effective_fft_size)
 {
     d_dump_number++;
     std::string filename = d_dump_filename;
@@ -508,7 +521,7 @@ void pcps_acquisition::dump_results(int32_t effective_fft_size)
 }
 
 
-float pcps_acquisition::max_to_input_power_statistic(uint32_t& indext, int32_t& doppler, uint32_t num_doppler_bins, int32_t doppler_max, int32_t doppler_step)
+float pcps_acquisition_robust::max_to_input_power_statistic(uint32_t& indext, int32_t& doppler, uint32_t num_doppler_bins, int32_t doppler_max, int32_t doppler_step)
 {
     float grid_maximum = 0.0;
     uint32_t index_doppler = 0U;
@@ -543,7 +556,7 @@ float pcps_acquisition::max_to_input_power_statistic(uint32_t& indext, int32_t& 
 }
 
 
-float pcps_acquisition::first_vs_second_peak_statistic(uint32_t& indext, int32_t& doppler, uint32_t num_doppler_bins, int32_t doppler_max, int32_t doppler_step)
+float pcps_acquisition_robust::first_vs_second_peak_statistic(uint32_t& indext, int32_t& doppler, uint32_t num_doppler_bins, int32_t doppler_max, int32_t doppler_step)
 {
     // Look for correlation peaks in the results
     // Find the highest peak and compare it to the second highest peak
@@ -611,8 +624,23 @@ float pcps_acquisition::first_vs_second_peak_statistic(uint32_t& indext, int32_t
     return firstPeak / secondPeak;
 }
 
+bool absolutevalue_sort(std::complex<float> a, std::complex<float> b)
+{
+   
+    return std::fabs(a) < std::fabs(b); 
+}
 
-void pcps_acquisition::acquisition_core(uint64_t samp_count)
+std::complex<float> median_value(volk_gnsssdr::vector<std::complex<float>> input, uint32_t size) 
+{ 
+    std::sort(input.begin(),input.end(),absolutevalue_sort);
+    if (size % 2 != 0) 
+        return (std::complex<float>)input[size / 2]; 
+  
+    return (std::complex<float>)(input[(size - 1) / 2] + input[size / 2]) / gr_complex(2.0, 0.0); 
+} 
+
+
+void pcps_acquisition_robust::acquisition_core(uint64_t samp_count)
 {
     gr::thread::scoped_lock lk(d_setlock);
 
@@ -620,6 +648,7 @@ void pcps_acquisition::acquisition_core(uint64_t samp_count)
     int32_t doppler = 0;
     uint32_t indext = 0U;
     int32_t effective_fft_size = (acq_parameters.bit_transition_flag ? d_fft_size / 2 : d_fft_size);
+    
     if (d_cshort)
         {
             volk_gnsssdr_16ic_convert_32fc(d_data_buffer.data(), d_data_buffer_sc.data(), d_consumed_samples);
@@ -632,8 +661,114 @@ void pcps_acquisition::acquisition_core(uint64_t samp_count)
                     d_input_signal[i] = gr_complex(0.0, 0.0);
                 }
         }
-    const gr_complex* in = d_input_signal.data();  // Get the input samples pointer
+    
+    memcpy( d_input_signal_sort.data(), d_input_signal.data(), effective_fft_size * sizeof(gr_complex));
+    std::complex<float> d_median=median_value(d_input_signal_sort,d_fft_size);
+     for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                    d_median_vector[i] = -d_median;
+                }
+     volk_32fc_x2_add_32fc(d_input_signal_sort.data(), d_input_signal_sort.data(), d_median_vector.data(), d_fft_size);
+     volk_32fc_magnitude_32f(d_deviation_vector.data(), d_input_signal_sort.data(), d_fft_size);
+     volk_32fc_32f_add_32fc(d_deviation_complex_vector.data(), initial_vector.data(), d_deviation_vector.data(), d_fft_size);
+     d_mad = median_value(d_deviation_complex_vector,d_fft_size);
+    if (d_time_method == "signum")
+        {
+            volk_32fc_magnitude_32f(magnitude_vector.data(), d_input_signal.data(), d_fft_size);
+            volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), d_fft_size);
+            for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                    d_input_signal[i] = d_input_signal[i] / magnitude_complex_vector[i];
+                }
+        }
+        
 
+    if (d_time_method == "myriad")
+        {
+            volk_32fc_magnitude_32f(magnitude_vector.data(), d_input_signal.data(), d_fft_size);
+            volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), d_fft_size);
+            std::complex<float> K = d_myriad_para * d_mad * d_mad / gr_complex(0.6745, 0.0) / gr_complex(0.6745, 0.0);
+            for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                    d_input_signal[i] = K*d_input_signal[i] / (K+magnitude_complex_vector[i]*magnitude_complex_vector[i]);
+                }
+        }
+
+    if (d_time_method == "huber" )
+        {
+            volk_32fc_magnitude_32f(magnitude_vector.data(), d_input_signal.data(), d_fft_size);
+            volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), d_fft_size);
+            std::complex<float> sigma_tunning = d_huber_tunning * d_mad / gr_complex(0.6745, 0.0);
+            for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                   if(std::fabs(d_input_signal[i])>std::fabs(sigma_tunning))
+                   {
+                       d_input_signal[i] = sigma_tunning * d_input_signal[i] / magnitude_complex_vector[i];
+                   }  
+                }
+        }
+     memcpy(d_fft_if->get_inbuf(), d_input_signal.data(), effective_fft_size * sizeof(gr_complex));
+     d_fft_if->execute();
+     memcpy(frequency_internal_vector.data(), d_fft_if->get_outbuf(), effective_fft_size * sizeof(gr_complex));
+     volk_32fc_magnitude_32f(magnitude_vector.data(), frequency_internal_vector.data(), d_fft_size);
+     volk_32fc_32f_add_32fc(magnitude_complex_vector.data(), initial_vector.data(), magnitude_vector.data(), d_fft_size);
+     memcpy( d_input_signal_sort.data(), frequency_internal_vector.data(), effective_fft_size * sizeof(gr_complex));
+     d_median=median_value(d_input_signal_sort,d_fft_size);
+     for (uint32_t i = 0; i < d_fft_size; i++)
+		{
+		    d_median_vector[i] = -d_median;
+		}
+     volk_32fc_x2_add_32fc(d_input_signal_sort.data(), d_input_signal_sort.data(), d_median_vector.data(), d_fft_size);
+     volk_32fc_magnitude_32f(d_deviation_vector.data(), d_input_signal_sort.data(), d_fft_size);
+     volk_32fc_32f_add_32fc(d_deviation_complex_vector.data(), initial_vector.data(), d_deviation_vector.data(), d_fft_size);
+     d_mad = median_value(d_deviation_complex_vector,d_fft_size);
+    if (d_frequency_method == "signum")
+        {
+            
+            for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                    frequency_internal_vector[i] = frequency_internal_vector[i] / magnitude_complex_vector[i];
+                }
+        }
+
+        
+    if (d_frequency_method == "myriad")
+        {
+            std::complex<float> K = d_myriad_para * d_mad * d_mad / gr_complex(0.6745, 0.0) / gr_complex(0.6745, 0.0);
+        
+            for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                    frequency_internal_vector[i] = K*frequency_internal_vector[i] / (K+magnitude_complex_vector[i]*magnitude_complex_vector[i]);
+                }
+                
+        }
+        
+    if (d_frequency_method == "huber")
+        {
+            std::complex<float> sigma_tunning = d_huber_tunning * d_mad / gr_complex(0.6745, 0.0);
+            for (uint32_t i = 0; i < d_fft_size; i++)
+                {
+                     if(std::fabs(frequency_internal_vector[i])>std::fabs(sigma_tunning))
+                     {
+                          frequency_internal_vector[i] = sigma_tunning * frequency_internal_vector[i] / magnitude_complex_vector[i];
+                     }
+
+                }
+        }
+    memcpy(d_ifft->get_inbuf(), frequency_internal_vector.data(), effective_fft_size * sizeof(gr_complex));
+    d_ifft->execute();
+    memcpy( d_input_signal.data(), d_ifft->get_outbuf(),effective_fft_size * sizeof(gr_complex));
+        float size_float=d_fft_size;
+    for (uint32_t i = 0; i < d_fft_size; i++)
+        {
+            d_input_signal[i] = d_input_signal[i] / gr_complex(size_float,0.0);
+            //d_input_signal[i] = d_input_signal[i] / gr_complex(1.0,0.0);
+        }
+     //std::cout<<d_input_signal[12].real()<<"real"<<d_input_signal[12].imag()<<"end for acquisition"<<d_cshort<<std::endl;   
+    const gr_complex* in = d_input_signal.data();  // Get the input samples pointer
+    
+    //std::cout<<in[12]<<"end for int"<<std::endl;
+    
     d_mag = 0.0;
     d_num_noncoherent_integrations_counter++;
 
@@ -654,6 +789,13 @@ void pcps_acquisition::acquisition_core(uint64_t samp_count)
                     // Remove Doppler
                     volk_32fc_x2_multiply_32fc(d_fft_if->get_inbuf(), in, d_grid_doppler_wipeoffs[doppler_index].data(), d_fft_size);
 
+                    //volk_32fc_magnitude_32f(magnitude_vector.data(), d_fft_if->get_outbuf(), d_fft_size);
+                    //std::fill_n(initial_vector.data(), d_fft_size, gr_complex(0.0, 0.0));
+                    //std::cout<<initial_vector[12].real()<<initial_vector[12].imag()<<"end for complex"<<std::endl;
+                    //volk_32fc_32f_add_32fc(initial_vector.data(),  initial_vector.data(), magnitude_vector.data(), d_fft_size);
+                    //std::cout<<initial_vector[12].real()<<initial_vector[12].imag()<<"end for complex"<<std::endl;
+                    //volk_32fc_x2_divide_32fc(d_fft_if->get_inbuf(), d_fft_if->get_outbuf(), initial_vector.data(),  d_fft_size);
+                    //std::cout<<magnitude_vector[12]<<"end for int"<<std::endl;
                     // Perform the FFT-based convolution  (parallel time search)
                     // Compute the FFT of the carrier wiped--off incoming signal
                     d_fft_if->execute();
@@ -858,12 +1000,13 @@ void pcps_acquisition::acquisition_core(uint64_t samp_count)
                 }
         }
     d_worker_active = false;
+    //std::cout<<d_dump_channel<<std::endl;
     if ((d_num_noncoherent_integrations_counter == acq_parameters.max_dwells) or (d_positive_acq == 1))
         {
             // Record results to file if required
             if (d_dump and d_channel == d_dump_channel)
                 {
-                    pcps_acquisition::dump_results(effective_fft_size);
+                    pcps_acquisition_robust::dump_results(effective_fft_size);
                 }
             d_num_noncoherent_integrations_counter = 0U;
             d_positive_acq = 0;
@@ -880,7 +1023,7 @@ void pcps_acquisition::acquisition_core(uint64_t samp_count)
 
 
 // Called by gnuradio to enable drivers, etc for i/o devices.
-bool pcps_acquisition::start()
+bool pcps_acquisition_robust::start()
 {
     d_sample_counter = 0ULL;
     calculate_threshold();
@@ -888,7 +1031,7 @@ bool pcps_acquisition::start()
 }
 
 
-void pcps_acquisition::calculate_threshold()
+void pcps_acquisition_robust::calculate_threshold()
 {
     float pfa = (d_step_two ? acq_parameters.pfa2 : acq_parameters.pfa);
 
@@ -906,7 +1049,7 @@ void pcps_acquisition::calculate_threshold()
 }
 
 
-int pcps_acquisition::general_work(int noutput_items __attribute__((unused)),
+int pcps_acquisition_robust::general_work(int noutput_items __attribute__((unused)),
     gr_vector_int& ninput_items,
     gr_vector_const_void_star& input_items,
     gr_vector_void_star& output_items __attribute__((unused)))
@@ -986,8 +1129,7 @@ int pcps_acquisition::general_work(int noutput_items __attribute__((unused)),
                                 buff_increment = d_consumed_samples - d_buffer_count;
                             }
                         memcpy(&d_data_buffer[d_buffer_count], in, sizeof(gr_complex) * buff_increment);
-                    }
-
+                    }   
                 // If buffer will be full in next iteration
                 if (d_buffer_count >= d_consumed_samples)
                     {
@@ -1008,7 +1150,7 @@ int pcps_acquisition::general_work(int noutput_items __attribute__((unused)),
                     }
                 else
                     {
-                        gr::thread::thread d_worker(&pcps_acquisition::acquisition_core, this, d_sample_counter);
+                        gr::thread::thread d_worker(&pcps_acquisition_robust::acquisition_core, this, d_sample_counter);
                         d_worker_active = true;
                     }
                 consume_each(0);

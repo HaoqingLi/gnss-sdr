@@ -67,6 +67,7 @@ DECLARE_string(log_dir);
 #include "unit-tests/signal-processing-blocks/acquisition/glonass_l1_ca_pcps_acquisition_gsoc2017_test.cc"
 #include "unit-tests/signal-processing-blocks/acquisition/gps_l1_ca_pcps_acquisition_gsoc2013_test.cc"
 #include "unit-tests/signal-processing-blocks/acquisition/gps_l1_ca_pcps_acquisition_test.cc"
+#include "unit-tests/signal-processing-blocks/acquisition/gps_l1_ca_pcps_acquisition_test_robust.cc"
 #include "unit-tests/signal-processing-blocks/acquisition/gps_l1_ca_pcps_quicksync_acquisition_gsoc2014_test.cc"
 #include "unit-tests/signal-processing-blocks/acquisition/gps_l1_ca_pcps_tong_acquisition_gsoc2013_test.cc"
 #include "unit-tests/signal-processing-blocks/adapter/adapter_test.cc"
@@ -134,6 +135,8 @@ DECLARE_string(log_dir);
 #include "unit-tests/signal-processing-blocks/tracking/gps_l1_ca_kf_tracking_test.cc"
 #include "unit-tests/signal-processing-blocks/tracking/gps_l2_m_dll_pll_tracking_test.cc"
 #include "unit-tests/signal-processing-blocks/tracking/tracking_pull-in_test.cc"
+#include "unit-tests/signal-processing-blocks/tracking/gps_l1_ca_dll_pll_tracking_test_robust.cc"
+
 #if FPGA_BLOCKS_TEST
 #include "unit-tests/signal-processing-blocks/tracking/tracking_pull-in_test_fpga.cc"
 #endif  // FPGA_BLOCKS_TEST

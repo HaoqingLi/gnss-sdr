@@ -10,6 +10,7 @@
 
 set(ACQ_GR_BLOCKS_SOURCES
     pcps_acquisition.cc
+    pcps_acquisition_robust.cc
     pcps_assisted_acquisition_cc.cc
     pcps_acquisition_fine_doppler_cc.cc
     pcps_tong_acquisition_cc.cc
@@ -21,6 +22,7 @@ set(ACQ_GR_BLOCKS_SOURCES
 
 set(ACQ_GR_BLOCKS_HEADERS
     pcps_acquisition.h
+    pcps_acquisition_robust.h
     pcps_assisted_acquisition_cc.h
     pcps_acquisition_fine_doppler_cc.h
     pcps_tong_acquisition_cc.h
